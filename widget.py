@@ -856,12 +856,18 @@ class PersonalOS(ctk.CTk):
                                font=ctk.CTkFont("Segoe UI", 10), text_color=MUTED,
                                anchor="w")
             lbl.pack(side="left", fill="x", expand=True)
+            def _auth_click(idx=i, b=None):
+                b.configure(text="…", state="disabled")
+                def _run():
+                    self._gmail_auth(idx)
+                    self.after(0, lambda: b.configure(state="normal"))
+                threading.Thread(target=_run, daemon=True).start()
+
             btn = ctk.CTkButton(row, text="Connect", width=64, height=22,
                                 fg_color=CARD, hover_color="#E4E6EB",
                                 text_color=ACCENT, font=ctk.CTkFont("Segoe UI", 9, "bold"),
-                                corner_radius=6,
-                                command=lambda idx=i: threading.Thread(
-                                    target=self._gmail_auth, args=(idx,), daemon=True).start())
+                                corner_radius=6)
+            btn.configure(command=lambda b=btn, idx=i: _auth_click(idx, b))
             btn.pack(side="right")
             self._gmail_acc_lbls[i] = lbl
             self._gmail_acc_btns[i] = btn
@@ -977,8 +983,8 @@ class PersonalOS(ctk.CTk):
     def _gmail_sync_all(self):
         self.after(0, lambda: self.gmail_sync_btn.configure(text="Syncing…", state="disabled"))
         total = 0
-        for idx, svc in self._gmail_status.items():
-            if svc and hasattr(svc, "_baseUrl"):
+        for idx, svc in list(self._gmail_status.items()):
+            if svc is not None:
                 total += self._gmail_sync_account(idx, svc)
         now_str = datetime.now().strftime("%H:%M")
         self.after(0, lambda: self.gmail_sync_btn.configure(text="Sync All", state="normal"))
