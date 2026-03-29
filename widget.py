@@ -995,11 +995,12 @@ class PersonalOS(ctk.CTk):
             'subject:("application received" OR "thank you for applying" OR '
             '"thank you for your application" OR "your application has been" OR '
             '"application confirmation" OR "successfully applied" OR '
-            '"we received your application" OR "application submitted" OR '
+            '"we received your application" OR "we received your job application" OR '
+            '"received your job application" OR "your job application" OR '
+            '"application submitted" OR "application for" OR '
             '"invitation to interview" OR "interview request" OR '
-            '"schedule.*interview" OR "offer letter" OR "job offer" OR '
-            '"not moving forward" OR "unfortunately.*position" OR '
-            '"we regret to inform") newer_than:180d'
+            '"interview invitation" OR "offer letter" OR "job offer" OR '
+            '"not moving forward" OR "we regret to inform") newer_than:180d'
         )
         try:
             res  = svc.users().messages().list(userId="me", q=query, maxResults=500).execute()
@@ -1084,9 +1085,11 @@ class PersonalOS(ctk.CTk):
         STRONG = [
             "application received", "thank you for applying", "thank you for your application",
             "your application has been", "application confirmation", "successfully applied",
-            "we received your application", "application submitted",
+            "we received your application", "we received your job application",
+            "received your job application", "your job application", "application submitted",
+            "application for", "applied for the position",
             "invitation to interview", "interview request", "interview scheduled",
-            "schedule.*interview", "phone screen", "video interview",
+            "phone screen", "video interview",
             "offer letter", "job offer", "pleased to offer",
             "not moving forward", "unfortunately", "regret to inform",
             "not selected", "position has been filled",
@@ -1108,7 +1111,32 @@ class PersonalOS(ctk.CTk):
         # Known ATS / job platform senders → extract company from subject
         ats_domains = ["greenhouse.io","lever.co","workday.com","myworkdayjobs.com",
                        "taleo.net","icims.com","smartrecruiters.com","jobvite.com",
-                       "linkedin.com","indeed.com","naukri.com","wellfound.com"]
+                       "linkedin.com","indeed.com","naukri.com","wellfound.com",
+                       "oracle.com","cloud.oracle.com","successfactors.com",
+                       "sap.com","recruitingbypaycor.com","paylocity.com",
+                       "ultipro.com","kronos.com","bamboohr.com","ashbyhq.com"]
+
+        # ── Try display name first (e.g. "JPMorgan Chase & Co. HR <no-reply@ats.com>")
+        display_match = re.match(r'^([^<@\n]{3,60}?)\s*<', sender)
+        display_name  = display_match.group(1).strip() if display_match else ""
+        # Strip generic HR/recruiting suffixes from display name
+        HR_SUFFIXES = r'\s*[\-–|,]?\s*(?:human resources?|talent acquisition|recruiting|hr|careers?|no.?reply|hiring|jobs?|notifications?|noreply|do not reply).*$'
+        if display_name:
+            cleaned = re.sub(HR_SUFFIXES, "", display_name, flags=re.IGNORECASE).strip(" .,&")
+            # Accept if it looks like a real company name (not just a person's name or generic word)
+            GENERIC_NAMES = {"careers", "recruiting", "hr", "jobs", "noreply", "hiring", "notifications"}
+            if cleaned and cleaned.lower() not in GENERIC_NAMES and len(cleaned) >= 3:
+                company = cleaned.title() if cleaned.isupper() else cleaned
+                # Still try to extract role from subject before returning
+                role_m = re.search(
+                    r'(?:for(?: the)?|position[: ]+|role[: ]+)\s*([A-Za-z][^\-\|,@]{3,45}?)(?=\s+(?:at|with|to|@|in)\b|\s*[\-\|,]|$)',
+                    subject, re.IGNORECASE)
+                if role_m:
+                    role = role_m.group(1).strip()
+                    ROLE_JUNK = {"your application","you for applying","the position","our team","this opportunity"}
+                    if any(j in role.lower() for j in ROLE_JUNK):
+                        role = ""
+                return company, role
 
         # Try to get domain from sender
         domain_match = re.search(r'@([\w.\-]+)', sender)

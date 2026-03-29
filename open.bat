@@ -3,22 +3,18 @@
 set "WIDGET=%~dp0widget.py"
 set "PYW="
 
-:: Scan standard install locations first
-for /d %%d in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-    if exist "%%d\pythonw.exe" if not defined PYW set "PYW=%%d\pythonw.exe"
+:: Try PATH-based python first (user's default version, most reliable)
+for /f "delims=" %%p in ('where python 2^>nul') do (
+    if not defined PYW for %%F in ("%%p") do (
+        if exist "%%~dpFpythonw.exe" set "PYW=%%~dpFpythonw.exe"
+    )
 )
-for /d %%d in ("C:\Python3*") do (
-    if exist "%%d\pythonw.exe" if not defined PYW set "PYW=%%d\pythonw.exe"
-)
-:: Fallback: pythonw on PATH
-if not defined PYW (
-    where pythonw >nul 2>&1 && set "PYW=pythonw"
-)
-:: Fallback: derive from python on PATH
-if not defined PYW (
-    for /f "delims=" %%p in ('where python 2^>nul') do (
-        if not defined PYW for %%F in ("%%p") do (
-            if exist "%%~dpFpythonw.exe" set "PYW=%%~dpFpythonw.exe"
+
+:: Fallback: scan by explicit version order, newest first
+for %%v in (314 313 312 311 310 39 38) do (
+    if not defined PYW (
+        if exist "%LOCALAPPDATA%\Programs\Python\Python%%v\pythonw.exe" (
+            set "PYW=%LOCALAPPDATA%\Programs\Python\Python%%v\pythonw.exe"
         )
     )
 )
