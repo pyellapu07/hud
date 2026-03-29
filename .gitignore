@@ -1,0 +1,31 @@
+# ── Google OAuth — NEVER commit these ─────────────────────────────────────────
+credentials.json
+cal_token.json
+gmail_token_*.json
+
+# ── Personal data (generated at runtime) ──────────────────────────────────────
+tasks.json
+buylist.json
+jobs.json
+assets.json
+settings.json
+widget_pos.json
+gmail_processed.json
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── IDE / OS ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
