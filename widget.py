@@ -964,7 +964,9 @@ class PersonalOS(ctk.CTk):
                     creds = flow.run_local_server(port=0, login_hint=email)
                 with open(token_path, "w") as fh: fh.write(creds.to_json())
             except Exception as e:
-                self.after(0, lambda: self._gmail_set_status(idx, f"Auth failed", False))
+                err_msg = str(e)[:80]
+                self.after(0, lambda m=err_msg: self._gmail_set_status(idx, f"Failed: {m}", False))
+                self.after(0, lambda m=err_msg: self._gmail_show_error(email, m))
                 return
 
         try:
@@ -974,14 +976,53 @@ class PersonalOS(ctk.CTk):
             self._gmail_status[idx] = svc
             self.after(0, lambda: self._gmail_set_status(idx, "Connected", True))
         except Exception as e:
-            self.after(0, lambda: self._gmail_set_status(idx, "Error", False))
+            err_msg = str(e)[:80]
+            self.after(0, lambda m=err_msg: self._gmail_set_status(idx, f"Error: {m}", False))
+            self.after(0, lambda m=err_msg: self._gmail_show_error(email, m))
 
     def _gmail_set_status(self, idx, text, ok):
-        email = self.gmail_accounts[idx]
-        dot   = "●" if ok else "○"
-        color = GREEN if ok else MUTED
-        self._gmail_acc_lbls[idx].configure(text=f"{dot}  {email}", text_color=color)
+        email     = self.gmail_accounts[idx]
+        dot       = "●" if ok else "○"
+        color     = GREEN if ok else (RED if "fail" in text.lower() or "error" in text.lower() else MUTED)
+        short_txt = text if len(text) <= 20 else text[:17] + "…"
+        self._gmail_acc_lbls[idx].configure(
+            text=f"{dot}  {email}  {short_txt}" if not ok else f"{dot}  {email}",
+            text_color=color)
         self._gmail_acc_btns[idx].configure(text="Re-auth" if ok else "Connect")
+
+    def _gmail_show_error(self, email, msg):
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Gmail Auth Error")
+        dlg.geometry("340x220")
+        dlg.resizable(False, False)
+        dlg.attributes("-topmost", True)
+        dlg.grab_set()
+        dlg.configure(fg_color=BG)
+        ctk.CTkLabel(dlg, text="Connection failed",
+                     font=ctk.CTkFont("Segoe UI", 14, "bold"), text_color=RED
+                     ).pack(padx=20, pady=(16, 4))
+        ctk.CTkLabel(dlg, text=email,
+                     font=ctk.CTkFont("Segoe UI", 11), text_color=MUTED
+                     ).pack(padx=20)
+        ctk.CTkTextbox(dlg, height=80, font=ctk.CTkFont("Segoe UI", 10),
+                       fg_color=CARD, text_color=TEXT,
+                       border_width=0, state="normal"
+                       ).pack(fill="x", padx=20, pady=8)
+        tb = dlg.winfo_children()[-1]
+        tb.insert("1.0", msg or "Unknown error")
+        tb.configure(state="disabled")
+        hints = []
+        if "credentials" in msg.lower() or "client" in msg.lower():
+            hints.append("Check credentials.json is a Desktop OAuth 2.0 client (not service account).")
+        if "access_denied" in msg.lower() or "403" in msg:
+            hints.append("Add your email as a Test User in Google Cloud Console → OAuth consent screen.")
+        if hints:
+            ctk.CTkLabel(dlg, text="\n".join(hints),
+                         font=ctk.CTkFont("Segoe UI", 10), text_color=MUTED,
+                         wraplength=300, justify="left").pack(padx=20, pady=(0, 8))
+        ctk.CTkButton(dlg, text="OK", height=32, fg_color=ACCENT, hover_color="#1565C0",
+                      font=ctk.CTkFont("Segoe UI", 11, "bold"), corner_radius=8,
+                      command=dlg.destroy).pack(fill="x", padx=20, pady=(0, 16))
 
     # ── Gmail sync ─────────────────────────────────────────────────────────────
     def _gmail_sync_all(self):
