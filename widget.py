@@ -956,18 +956,26 @@ class PersonalOS(ctk.CTk):
 
         if not creds or not creds.valid:
             if silent: return   # Don't pop browser silently
-            try:
-                if creds and creds.expired and creds.refresh_token:
+            # If refresh token is stale/revoked, delete it and do a fresh flow
+            if creds and creds.expired and creds.refresh_token:
+                try:
                     creds.refresh(Request())
-                else:
+                    with open(token_path, "w") as fh: fh.write(creds.to_json())
+                except Exception:
+                    # Refresh failed (invalid_grant etc.) — wipe token, re-auth fresh
+                    try: os.remove(token_path)
+                    except Exception: pass
+                    creds = None
+            if not creds or not creds.valid:
+                try:
                     flow  = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
                     creds = flow.run_local_server(port=0, login_hint=email)
-                with open(token_path, "w") as fh: fh.write(creds.to_json())
-            except Exception as e:
-                err_msg = str(e)[:80]
-                self.after(0, lambda m=err_msg: self._gmail_set_status(idx, f"Failed: {m}", False))
-                self.after(0, lambda m=err_msg: self._gmail_show_error(email, m))
-                return
+                    with open(token_path, "w") as fh: fh.write(creds.to_json())
+                except Exception as e:
+                    err_msg = str(e)[:80]
+                    self.after(0, lambda m=err_msg: self._gmail_set_status(idx, f"Failed: {m}", False))
+                    self.after(0, lambda m=err_msg: self._gmail_show_error(email, m))
+                    return
 
         try:
             svc = build("gmail", "v1", credentials=creds)
