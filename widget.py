@@ -9,6 +9,15 @@ from datetime import datetime, date, timedelta
 
 POWERSHELL = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 
+# -- Job profile ---------------------------------------------------------------
+# READ FROM THE OUTREACH TOOLING'S GROUND TRUTH, never copied into this repo.
+# CopilotEngineV1 already maintains this file as the single source for what the
+# application tooling may claim about you; duplicating the values here would mean
+# two answers to "what is my LinkedIn" that drift the first time one is fixed.
+#
+# Override with "job_profile_path" in settings.json if that project ever moves.
+JOB_PROFILE_DEFAULT = r"F:\CopilotEngineV1\backend\data\user_context_ground_truth.json"
+
 def toast(title: str, message: str):
     """Show a Windows toast notification (no extra packages needed)."""
     safe_title   = title.replace('"', "'")
@@ -167,14 +176,18 @@ class PersonalOS(ctk.CTk):
             return ""
 
     def _do_copy(self):
-        if not self._copy_text:
+        self._copy_now(self._copy_text, self._copy_widget)
+
+    def _copy_now(self, text, flash=None):
+        """Put text on the clipboard. The one path both copy features use."""
+        if not text:
             return
         self.clipboard_clear()
-        self.clipboard_append(self._copy_text)
+        self.clipboard_append(text)
         # Tk hands the clipboard over lazily; without this the contents can be
         # lost if the widget closes before another app asks for them.
         self.update()
-        self._flash_copied(self._copy_widget)
+        self._flash_copied(flash)
 
     def _flash_copied(self, widget):
         """Blink the line that was copied, so it is obvious WHICH one landed.
@@ -364,7 +377,7 @@ class PersonalOS(ctk.CTk):
         self._tab_btns = {}
         for key, label in [("tasks","Tasks"),("buy","Buy"),("jobs","Jobs"),
                            ("assets","Assets"),("cal","Cal"),
-                           ("habits","Habits")]:
+                           ("habits","Habits"),("profile","Me")]:
             btn = ctk.CTkButton(tab_bar, text=label, width=44, height=28,
                                 fg_color="transparent", hover_color=CARD,
                                 text_color=MUTED, font=ctk.CTkFont("Segoe UI", 10, "bold"),
@@ -392,7 +405,7 @@ class PersonalOS(ctk.CTk):
         container = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         container.pack(fill="both", expand=True)
 
-        for key in ("tasks", "buy", "jobs", "assets", "cal", "habits"):
+        for key in ("tasks", "buy", "jobs", "assets", "cal", "habits", "profile"):
             f = ctk.CTkFrame(container, fg_color=BG, corner_radius=0)
             f.place(relx=0, rely=0, relwidth=1, relheight=1)
             self._frames[key] = f
@@ -403,6 +416,7 @@ class PersonalOS(ctk.CTk):
         self._build_assets_tab()
         self._build_cal_tab()
         self._build_habits_tab()
+        self._build_profile_tab()
 
     def _switch_tab(self, key):
         self._active_tab = key
@@ -418,7 +432,8 @@ class PersonalOS(ctk.CTk):
 
         refresh = {"tasks": self._render_tasks, "buy": self._render_buy,
                    "jobs": self._render_jobs, "assets": self._render_assets,
-                   "cal": self._render_cal, "habits": self._render_habits}
+                   "cal": self._render_cal, "habits": self._render_habits,
+                   "profile": self._render_profile}
         refresh[key]()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -2099,6 +2114,122 @@ class PersonalOS(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════════════
     # HABITS TAB
     # ══════════════════════════════════════════════════════════════════════════
+    # ==========================================================================
+    # ME TAB - the answers every job application asks for
+    # ==========================================================================
+    def _build_profile_tab(self):
+        f = self._frames["profile"]
+        self.profile_scroll = ctk.CTkScrollableFrame(
+            f, fg_color="transparent", scrollbar_button_color=SURFACE)
+        self.profile_scroll.pack(fill="both", expand=True, padx=8, pady=(8, 8))
+
+    def _load_job_profile(self):
+        """The outreach tooling's ground truth, or None with a reason.
+
+        NOT CACHED INTO THIS REPO. Correcting a link should mean correcting it
+        once, in the file the application tooling already reads - a copy here
+        would be a second answer that silently goes stale.
+        """
+        path = self.settings.get("job_profile_path", JOB_PROFILE_DEFAULT)
+        if not os.path.exists(path):
+            return None, path
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh), path
+        except Exception:
+            return None, path
+
+    def _profile_fields(self, data):
+        """Flatten the ground truth into the order a form asks for it."""
+        ap  = data.get("applicant_profile", {})
+        con = ap.get("contact", {})
+        edu = ap.get("education", {})
+        grad = edu.get("graduate", {}) or {}
+        ugrad = edu.get("undergraduate", {}) or {}
+
+        def school(e):
+            bits = [e.get("university"), e.get("degree")]
+            gpa, when = e.get("gpa"), e.get("timeline")
+            if gpa:  bits.append("GPA " + str(gpa))
+            if when: bits.append(str(when))
+            return ", ".join(b for b in bits if b)
+
+        rows = [
+            ("Full name",     ap.get("legal_name")),
+            ("Email",         con.get("email")),
+            ("Phone",         con.get("phone")),
+            ("LinkedIn",      con.get("linkedin")),
+            ("Portfolio",     con.get("portfolio")),
+            ("GitHub",        con.get("github")),
+            ("Work authorization", ap.get("work_authorization")),
+            ("Education",     school(grad)),
+            ("Undergraduate", school(ugrad)),
+        ]
+        return [(k, v) for k, v in rows if v]
+
+    def _render_profile(self):
+        for w in self.profile_scroll.winfo_children():
+            w.destroy()
+
+        data, path = self._load_job_profile()
+        if not data:
+            # SAY WHERE IT LOOKED. "No profile found" sends you hunting; the
+            # path tells you whether the file moved or the setting is wrong.
+            ctk.CTkLabel(self.profile_scroll,
+                         text="Can't read your job profile.",
+                         font=ctk.CTkFont("Segoe UI", 12, "bold"),
+                         text_color=TEXT).pack(pady=(30, 4))
+            self._selectable(self.profile_scroll, path, bg=BG, size=10,
+                             colour=MUTED).pack(fill="x", padx=14, pady=(0, 8))
+            ctk.CTkLabel(self.profile_scroll, wraplength=280, justify="left",
+                         text=('Set "job_profile_path" in settings.json to the '
+                               "outreach tooling's user_context_ground_truth.json."),
+                         font=ctk.CTkFont("Segoe UI", 11),
+                         text_color=MUTED).pack(padx=14)
+            return
+
+        fields = self._profile_fields(data)
+        if not fields:
+            ctk.CTkLabel(self.profile_scroll,
+                         text="Profile file has no contact details yet.",
+                         text_color=MUTED,
+                         font=ctk.CTkFont("Segoe UI", 12)).pack(pady=40)
+            return
+
+        for label, value in fields:
+            self._profile_row(label, str(value))
+
+        # Where it came from, so a wrong value is traceable without guessing.
+        ctk.CTkLabel(self.profile_scroll, text="from " + os.path.basename(path),
+                     font=ctk.CTkFont("Segoe UI", 9),
+                     text_color=MUTED).pack(pady=(10, 2))
+
+    def _profile_row(self, label, value):
+        """One answer: its name, a copy button, and the selectable value."""
+        card = ctk.CTkFrame(self.profile_scroll, fg_color=CARD, corner_radius=8)
+        card.pack(fill="x", pady=3)
+
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=10, pady=(6, 0))
+
+        ctk.CTkLabel(head, text=label.upper(),
+                     font=ctk.CTkFont("Segoe UI", 9, "bold"),
+                     text_color=MUTED, anchor="w").pack(side="left")
+
+        # The value is selectable too, so you can take half a line when the
+        # whole field is not what the form wants.
+        box = self._selectable(card, value, bg=CARD)
+
+        ctk.CTkButton(
+            head, text="Copy", width=42, height=20,
+            fg_color="transparent", hover_color=SURFACE,
+            text_color=ACCENT, font=ctk.CTkFont("Segoe UI", 10, "bold"),
+            corner_radius=4,
+            command=lambda v=value, b=box: self._copy_now(v, b),
+        ).pack(side="right")
+
+        box.pack(fill="x", padx=10, pady=(1, 8))
+
     def _build_habits_tab(self):
         f = self._frames["habits"]
         self.habits_scroll = ctk.CTkScrollableFrame(f, fg_color="transparent",
