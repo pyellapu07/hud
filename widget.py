@@ -3,6 +3,7 @@ Personal OS Widget — compact desktop widget, always on the home screen.
 Tabs: Tasks · Buy · Jobs · Assets
 """
 import customtkinter as ctk
+import tkinter as tk
 import json, os, ctypes, threading, urllib.request, urllib.error, subprocess
 from datetime import datetime, date, timedelta
 
@@ -101,11 +102,143 @@ class PersonalOS(ctk.CTk):
             self._open_settings_dialog(first_run=True)
 
         self._build_ui()
+        self._enable_text_copy()
+        self._enable_wheel_scroll()
         self._fix_taskbar()
         self._switch_tab("tasks")
 
         threading.Thread(target=self._fetch_gold, daemon=True).start()
         self._start_reminder_checker()
+
+    # ── Copy text out ──────────────────────────────────────────────────────────
+    def _enable_text_copy(self):
+        """Right-click any text to copy it.
+
+        WHY NOT PLAIN SELECTION. Everything on this widget is a CTkLabel, and a
+        label in Tk is a drawn string, not an editable buffer - it has no
+        selection model at all, so there is no click-drag highlight to enable
+        and no setting that adds one. (run_app.py's pywebview window passes
+        text_select=True, which is why copying works THERE and not here; they
+        are two different toolkits rendering the same data.)
+
+        Making the text selectable for real would mean turning all 60 labels
+        into read-only Entry or Text widgets, which carry their own borders,
+        fixed heights and no wraplength - it would rebuild the layout to buy a
+        drag-highlight nobody asked for. What was actually wanted is the text
+        on the clipboard, and for these rows that means the WHOLE line: the
+        tasks here are commands like `wsl.exe --shutdown`, which you want
+        complete, not a substring of.
+
+        ONE CLASS BINDING, NOT 60 WIDGET BINDINGS. bind_class registers against
+        Tk's "Label" class, so every label in the app answers to it - including
+        the ones redrawn on every tab switch and every list refresh. Binding
+        each widget instead would mean re-binding after each render, and a row
+        added later would silently not be copyable.
+        """
+        menu = tk.Menu(self, tearoff=0)
+        self._copy_menu = menu
+        self._copy_text = ""
+        self._copy_widget = None
+
+        menu.add_command(label="Copy", command=self._do_copy)
+
+        def popup(event):
+            text = self._label_text(event.widget)
+            if not text:
+                return
+            self._copy_text = text
+            self._copy_widget = event.widget
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                # Without this the menu keeps the pointer grab and the widget
+                # stops responding to anything else.
+                menu.grab_release()
+
+        # add="+" so this never replaces a binding the app already has.
+        self.bind_class("Label", "<Button-3>", popup, add="+")
+
+    @staticmethod
+    def _label_text(widget):
+        """The visible string on a Tk label, or "" if it has none."""
+        try:
+            return str(widget.cget("text")).strip()
+        except Exception:
+            return ""
+
+    def _do_copy(self):
+        if not self._copy_text:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self._copy_text)
+        # Tk hands the clipboard over lazily; without this the contents can be
+        # lost if the widget closes before another app asks for them.
+        self.update()
+        self._flash_copied(self._copy_widget)
+
+    def _flash_copied(self, widget):
+        """Blink the line that was copied, so it is obvious WHICH one landed.
+
+        Tied to the label itself rather than a toast: a notification says
+        something was copied, the blink says which row it came from, and on a
+        list of near-identical commands that is the part worth knowing.
+        """
+        if widget is None:
+            return
+        try:
+            before = widget.cget("fg")
+            widget.configure(fg=ACCENT)
+            self.after(260, lambda: self._restore_fg(widget, before))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _restore_fg(widget, colour):
+        try:
+            widget.configure(fg=colour)
+        except Exception:
+            # The row can be redrawn before the timer fires; nothing to restore.
+            pass
+
+    # ── Mouse wheel ────────────────────────────────────────────────────────────
+    def _enable_wheel_scroll(self):
+        """Let the wheel reach the lists.
+
+        CTkScrollableFrame ALREADY handles this correctly - its
+        `_mouse_wheel_all` walks up from whatever child the pointer is over
+        until it finds the scroll canvas, so a label inside a card inside the
+        list still scrolls the right thing. Nothing was wrong with it.
+
+        What was wrong is that it never ran. The handler is registered with
+        `bind_all`, and Tk delivers <MouseWheel> to the application holding
+        FOCUS, not to the window under the pointer. This window is
+        `overrideredirect(True)` - no title bar, no frame - so Windows never
+        activates it on its own and Tk had no focused widget to deliver to. The
+        wheel events went to whatever was behind the widget.
+
+        So the fix is focus, not scrolling: take focus when the pointer enters,
+        and CTk's own handler does the rest. Adding a second wheel binding here
+        would have scrolled every list twice per notch, because both would fire.
+
+        THE TRADE-OFF, because it is a real one: this pulls focus away from
+        whatever you were typing in when the pointer crosses the widget. That is
+        the price of hover-to-scroll on a frameless window, and it is the
+        behaviour every other app gets for free from Windows. If it ever
+        interrupts you mid-sentence, delete the <Enter> line below and scrolling
+        then needs one click on the widget first.
+        """
+        def take_focus(_event=None):
+            # focus_displayof() returns None when the focus belongs to another
+            # application, which is exactly when the wheel would be lost.
+            try:
+                if self.focus_displayof() is None:
+                    self.focus_force()
+            except Exception:
+                # Raises while the window is being torn down; nothing to do.
+                pass
+
+        self.bind("<Enter>", take_focus, add="+")
+        self.bind("<Button-1>", take_focus, add="+")
 
     # ── Window ─────────────────────────────────────────────────────────────────
     def _build_window(self):
