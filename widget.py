@@ -192,6 +192,57 @@ class PersonalOS(ctk.CTk):
         except Exception:
             pass
 
+    def _selectable(self, parent, text, *, bg, size=12, colour=None, pad=0):
+        """A block of text you can drag-select and Ctrl+C, like any text field.
+
+        A Tk Label cannot do this - it draws a string and has no selection
+        model - so the one place it genuinely matters gets a real Text widget
+        instead. `state="disabled"` keeps it read-only while leaving selection
+        and the Text class's own <<Copy>> binding intact, so Ctrl+C works
+        without a line of code from us.
+
+        It is deliberately not applied to the collapsed row above, which shows
+        a TRUNCATED preview: selecting "docker system prune -a every month o..."
+        would hand you the ellipsis, not the command. The expanded view holds
+        the whole string, which is the one worth copying.
+
+        SIZED TO ITS CONTENT, ON <Configure> RATHER THAN ONCE. A Text has a
+        fixed height in lines and no equivalent of wraplength, so the height has
+        to be measured after Tk wraps the string - and that means after the
+        geometry manager has given the box its real width.
+
+        An idle callback is too early: `width=1` is still in force, the text
+        wraps at one character, and `count(displaylines)` answers 87 for a line
+        that renders as two. <Configure> fires once the width is real and again
+        on every resize, so the measurement always matches what is on screen.
+        The height is only written when it actually changed, which is what stops
+        the resize from re-triggering itself forever.
+        """
+        box = tk.Text(
+            parent, wrap="word", relief="flat", bd=0, highlightthickness=0,
+            padx=pad, pady=0, width=1, height=1, cursor="xterm",
+            font=("Segoe UI", size), fg=colour or TEXT, bg=bg,
+            selectbackground=ACCENT, selectforeground="white",
+            inactiveselectbackground="#CFE0FB",
+        )
+        box.insert("1.0", text)
+        box.configure(state="disabled")
+
+        def fit(_event=None):
+            try:
+                if box.winfo_width() <= 1:
+                    return                      # not laid out yet; wait for the next one
+                lines = box.count("1.0", "end", "displaylines")
+                want = max(1, int(lines[0]) if lines else 1)
+                if int(box.cget("height")) != want:
+                    box.configure(height=want)
+            except Exception:
+                # Row can be destroyed by a refresh before this fires.
+                pass
+
+        box.bind("<Configure>", fit, add="+")
+        return box
+
     @staticmethod
     def _restore_fg(widget, colour):
         try:
@@ -531,11 +582,9 @@ class PersonalOS(ctk.CTk):
             detail = ctk.CTkFrame(outer, fg_color="#F0F2F5", corner_radius=0)
             detail.pack(fill="x")
 
-            # Full text
-            ctk.CTkLabel(detail, text=text, wraplength=270, justify="left",
-                         font=ctk.CTkFont("Segoe UI", 12),
-                         text_color=TEXT, anchor="w"
-                         ).pack(anchor="w", padx=14, pady=(8, 4))
+            # Full text — selectable, because this is the string you came for
+            self._selectable(detail, text, bg="#F0F2F5").pack(
+                fill="x", padx=14, pady=(8, 4))
 
             # Reminder line
             if t.get("remind_at"):
